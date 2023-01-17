@@ -1,5 +1,5 @@
 # otus_lesson_2
-## Добавить в Vagrantfile еще дисков
+# Добавить в Vagrantfile еще дисков
 <details>
 В файл *Vagrantfile* добавил 5й диск
 >:sata5 => {
@@ -34,7 +34,7 @@ ARRAY /dev/md0 level=raid6 num-devices=5 metadata=1.2 name=otuslearn:0 UUID=7cae
 </details>
 
 
-## Сломать/починить RAID
+# Сломать/починить RAID
 <details>
 
 Зафейлим диск
@@ -102,8 +102,7 @@ md0 : active raid6 sde[5] sdf[4] sdd[2] sdc[1] sdb[0] \
 >root@otuslearn:/home/vagrant# 
 </details>
 
-## Создать GPT раздел, пять партиций и
-## смонтировать их на диск
+# Создать GPT раздел, пять партиций и смонтировать их на диск
 
 <details>
 **root@otuslearn:/home/vagrant# parted -s /dev/md0 mklabel gpt** \
@@ -177,11 +176,104 @@ none            457G   45G  412G  10% /vagrant \
 </details>
 
 <details>
-<summary>##Прописал собранный рейд в конфиг-файл /etc/mdadm/mdadm.conf, чтобы рейд собирался при загрузке</summary>
+#<summary>Прописал собранный рейд в конфиг-файл /etc/mdadm/mdadm.conf, чтобы рейд собирался при загрузке</summary>
 
 ```vagrant@otuslearn:~$ cat /etc/mdadm/mdadm.conf
   DEVICE partitions
   ARRAY /dev/md0 metadata=1.2 name=otuslearn:0 UUID=7cae2cc1:804951b0:d37f597f:3225ed27
   vagrant@otuslearn:~$ 
 ```
+</details>
+
+<details>
+#<summary>Cкрипт для создания рейда</summary>
+```#!/bin/bash
+sdx="/dev/sdb /dev/sdc /dev/sdd /dev/sde /dev/sdf"
+for i in $sdx; do
+echo "n\np\n1\n\nt\nfd\nw" | fdisk $i;done
+```
+</details>
+
+<details>
+#<summary>Измененный Vagrantfile</summary>
+```
+MACHINES = {
+  :otuslinux => {
+        :box_name => "ubuntu/trusty64",
+        :ip_addr => '192.168.11.101',
+	:disks => {
+		:sata1 => {
+			:dfile => './disk1.vdi',
+			:size => 250,
+			:port => 1
+		},
+		:sata2 => {
+			:dfile => './disk2.vdi',
+                        :size => 250, # Megabytes
+			:port => 2
+		},
+                :sata3 => {
+                         :dfile => './disk3.vdi',
+                         :size => 250,
+                         :port => 3
+                },
+                :sata4 => {
+                         :dfile => './disk4.vdi',
+                         :size => 250, # Megabytes
+                         :port => 4
+                },
+		:sata5 => {
+			:dfile => './disk5.vdi',
+			:size => 250,
+			:port => 5
+		}
+
+	}		
+  },
+}
+
+Vagrant.configure("2") do |config|
+	MACHINES.each do |boxname, boxconfig|
+	   config.vm.define boxname do |box|
+		box.vm.box = "ubuntu/trusty64"
+		box.vm.network "private_network", ip: "192.168.56.101"
+		box.vm.host_name = "otuslearn"
+		
+		box.vm.provider :virtualbox do |vb|
+			vb.customize ["modifyvm", :id, "--memory", "2048"]
+			vb.customize ["modifyvm", :id, "--cpus", "2"] 
+			vb.name = "ubuntu-lesson02_2"
+
+			boxconfig[:disks].each do |dname, dconf|
+			  unless File.exist?(dconf[:dfile])
+				vb.customize ['createmedium', 'disk', '--filename', dconf[:dfile], '--variant', 'Fixed', '--size', dconf[:size], '--format', 'VDI']
+                                needsController =  true
+                          end
+
+			end
+				boxconfig[:disks].each do |dname, dconf|
+					vb.customize ['storageattach', :id,  '--storagectl', 'SATAController', '--port', dconf[:port], '--device', 0, '--type', 'hdd', '--medium', dconf[:dfile]]
+				end
+		end
+
+	config.vm.provision "file", source: "script.sh", destination: "/home/vagrant/script.sh" 
+	box.vm.provision "shell", inline: <<-SHELL
+                mkdir -p ~root/.ssh
+                cp ~vagrant/.ssh/auth* ~root/.ssh
+                apt-get install -y mdadm
+		cd /home/vagrant && bash ./script.sh
+		mdadm --zero-superblock --force /dev/sd{b,c,d,e,f}
+		mdadm --create --verbose /dev/md0 -l 6 -n 5 /dev/sd{b,c,d,e,f}
+		echo "DEVICE partitions" > /etc/mdadm/mdadm.conf
+		mdadm --detail --scan --verbose | awk '/ARRAY/ {print}' >> /etc/mdadm/mdadm.conf
+		mkfs.ext4 /dev/md0
+		mount /dev/md0 /mnt
+        SHELL
+	    end
+
+	end
+end
+
+```
+
 </details>
