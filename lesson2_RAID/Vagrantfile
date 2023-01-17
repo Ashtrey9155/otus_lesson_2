@@ -1,0 +1,76 @@
+MACHINES = {
+  :otuslinux => {
+        :box_name => "ubuntu/trusty64",
+        :ip_addr => '192.168.11.101',
+	:disks => {
+		:sata1 => {
+			:dfile => './disk1.vdi',
+			:size => 250,
+			:port => 1
+		},
+		:sata2 => {
+			:dfile => './disk2.vdi',
+                        :size => 250, # Megabytes
+			:port => 2
+		},
+                :sata3 => {
+                         :dfile => './disk3.vdi',
+                         :size => 250,
+                         :port => 3
+                },
+                :sata4 => {
+                         :dfile => './disk4.vdi',
+                         :size => 250, # Megabytes
+                         :port => 4
+                },
+		:sata5 => {
+			:dfile => './disk5.vdi',
+			:size => 250,
+			:port => 5
+		}
+
+	}		
+  },
+}
+
+Vagrant.configure("2") do |config|
+	MACHINES.each do |boxname, boxconfig|
+	   config.vm.define boxname do |box|
+		box.vm.box = "ubuntu/trusty64"
+		box.vm.network "private_network", ip: "192.168.56.101"
+		box.vm.host_name = "otuslearn"
+		
+		box.vm.provider :virtualbox do |vb|
+			vb.customize ["modifyvm", :id, "--memory", "2048"]
+			vb.customize ["modifyvm", :id, "--cpus", "2"] 
+			vb.name = "ubuntu-lesson02_2"
+
+			boxconfig[:disks].each do |dname, dconf|
+			  unless File.exist?(dconf[:dfile])
+				vb.customize ['createmedium', 'disk', '--filename', dconf[:dfile], '--variant', 'Fixed', '--size', dconf[:size], '--format', 'VDI']
+                                needsController =  true
+                          end
+
+			end
+				boxconfig[:disks].each do |dname, dconf|
+					vb.customize ['storageattach', :id,  '--storagectl', 'SATAController', '--port', dconf[:port], '--device', 0, '--type', 'hdd', '--medium', dconf[:dfile]]
+				end
+		end
+
+	config.vm.provision "file", source: "script.sh", destination: "/home/vagrant/script.sh" 
+	box.vm.provision "shell", inline: <<-SHELL
+                mkdir -p ~root/.ssh
+                cp ~vagrant/.ssh/auth* ~root/.ssh
+                apt-get install -y mdadm
+		cd /home/vagrant && bash ./script.sh
+		mdadm --zero-superblock --force /dev/sd{b,c,d,e,f}
+		mdadm --create --verbose /dev/md0 -l 6 -n 5 /dev/sd{b,c,d,e,f}
+		echo "DEVICE partitions" > /etc/mdadm/mdadm.conf
+		mdadm --detail --scan --verbose | awk '/ARRAY/ {print}' >> /etc/mdadm/mdadm.conf
+		mkfs.ext4 /dev/md0
+		mount /dev/md0 /mnt
+        SHELL
+	    end
+
+	end
+end
